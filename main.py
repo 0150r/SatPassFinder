@@ -20,15 +20,11 @@ EVENT_LOS = 2
 HTTP_STATUS_OK = 200
 
 class Sat:
-    def __init__(self, satID):
-        self.satID = satID # NORAD ID
-        self.satName = "None"
-        self.tleLine1 = ""
-        self.tleLine2 = ""
-
-        # events are components of a pass
-        self.events = []
-        self.eventTimes = []
+    def __init__(self, satellite_id):
+        self.norad_id = satellite_id # NORAD ID
+        self.sat_name = "None"
+        self.tle_line1 = ""
+        self.tle_line2 = ""
 
         # timescale
         self.ts = None
@@ -40,8 +36,8 @@ class Sat:
         self.observer = None
 
     # get TLE from Celestrack.
-    def getTLE(self):
-        url = "https://celestrak.org/NORAD/elements/gp.php?CATNR=" + self.satID + "&FORMAT=TLE"
+    def get_TLE(self):
+        url = "https://celestrak.org/NORAD/elements/gp.php?CATNR=" + self.norad_id + "&FORMAT=TLE"
         
         # request the TLE from Celestrak
         # data returned is three lines with the first line being the satellite name
@@ -50,7 +46,7 @@ class Sat:
         # make sure we have valid data
         # Celestrak returns "No GP data found" if you have an invalid NORAD ID
         if response.status_code != HTTP_STATUS_OK or "No GP data found" in response.text:
-            raise Exception(f"Failed to fetch TLE data for {self.satID}")
+            raise Exception(f"Failed to fetch TLE data for {self.norad_id}")
         
         # strip out whitepace
         lines = response.text.strip().split('\n')
@@ -60,16 +56,16 @@ class Sat:
             raise Exception("Invalid TLE data received")
         
         # store the data
-        self.satName = lines[0].strip()
-        self.tleLine1 = lines[1].strip()
-        self.tleLine2 = lines[2].strip()
+        self.sat_name = lines[0].strip()
+        self.tle_line1 = lines[1].strip()
+        self.tle_line2 = lines[2].strip()
 
     # calculate future passes
     def calculate_passes(self, lat, lon, num_passes=10, min_degrees=10.0):
         self.ts = load.timescale()
 
         # defines the satellite’s orbit in a geocentric frame (relative to Earth’s center)
-        self.satellite = EarthSatellite(self.tleLine1, self.tleLine2, self.satName, self.ts)
+        self.satellite = EarthSatellite(self.tle_line1, self.tle_line2, self.sat_name, self.ts)
 
         # create a topocentric reference point at the user’s location
         self.observer = Topos(latitude_degrees=lat, longitude_degrees=lon)
@@ -85,12 +81,12 @@ class Sat:
         # look ahead 7 days
         t1 = self.ts.utc(t0.utc_datetime() + timedelta(days=7))
         
-        eventTimes, events = self.satellite.find_events(self.observer, t0, t1, altitude_degrees=min_degrees)
+        event_times, events = self.satellite.find_events(self.observer, t0, t1, altitude_degrees=min_degrees)
                
         passes = []
         current_pass = SatPass(self)
  
-        for time, event in zip(eventTimes, events):
+        for time, event in zip(event_times, events):
             # Calculate position at this time
             topocentric = self.difference.at(time)
             el, az, _ = topocentric.altaz()
@@ -149,7 +145,7 @@ class SatPass:
         # calculate the time fop num_points amount of steps throughout the pass
         time_steps = [self.sat.ts.utc(self.aos_time.utc_datetime() + 
                                       timedelta(seconds=i * duration / NUM_POINTS)) 
-                                      for i in range(NUM_POINTS + 1)]
+                                      for i in range(NUM_POINTS)]
       
         self.doppler_up, self.doppler_down = [], []        
 
@@ -171,12 +167,12 @@ class SatPass:
             rv = np.dot(velocity, position) / np.linalg.norm(position)
             
             # calculate the doppler shift
-            dopplerUp = uplink_freq * rv / C
-            dopplerDown = -downlink_freq * rv / C
+            dop_up = uplink_freq * rv / C
+            dop_down = -downlink_freq * rv / C
 
             # add to the collection
-            self.doppler_up.append(dopplerUp)
-            self.doppler_down.append(dopplerDown)
+            self.doppler_up.append(dop_up)
+            self.doppler_down.append(dop_down)
 
     def calculate_path(self):
         # calculate the duration of the satellite pass
@@ -185,7 +181,7 @@ class SatPass:
         # calculate the time fop num_points amount of steps throughout the pass
         time_steps = [self.sat.ts.utc(self.aos_time.utc_datetime() + 
                                       timedelta(seconds=i * duration / NUM_POINTS)) 
-                                      for i in range(NUM_POINTS + 1)]
+                                      for i in range(NUM_POINTS)]
         
         self.azimuths, self.elevations = [], []
  
@@ -218,7 +214,7 @@ class SatPass:
         
         # plot path, "b-" is for a solid blue line
         az_rad = np.radians(self.azimuths)
-        ax.plot(az_rad, [90 - ii  for ii in self.elevations], 'b-', label=f'{self.sat.satName} Path')
+        ax.plot(az_rad, [90 - ii  for ii in self.elevations], 'b-', label=f'{self.sat.sat_name} Path')
         
         # plot key points
         # go is green circle, ro is red circle, yo is yellow circle
@@ -292,14 +288,14 @@ def main():
     lat, lon = maidenhead_to_latlon(grid)
     print(f"Location: {lat:.4f}°N, {lon:.4f}°E")
     
-    sat = Sat(satID=sat_id)
+    sat = Sat(satellite_id=sat_id)
 
     # fetch TLE data
     print("Fetching latest TLE data from CelesTrak...")
-    sat.getTLE()
-    print(f"{sat.satName}")
-    print(f"TLE Line 1: {sat.tleLine1}")
-    print(f"TLE Line 2: {sat.tleLine2}")
+    sat.get_TLE()
+    print(f"{sat.sat_name}")
+    print(f"TLE Line 1: {sat.tle_line1}")
+    print(f"TLE Line 2: {sat.tle_line2}")
 
     # calculate passes
     print("\nCalculating next 10 passes...")
@@ -335,7 +331,7 @@ def main():
     passes[0].calculate_path()
 
     print("Plotting")
-    passes[0].plot_polar_flight_path(f"{sat.satName} - {grid} - Polar View")
+    passes[0].plot_polar_flight_path(f"{sat.sat_name} - {grid} - Polar View")
     print("Complete")
 
 if __name__ == "__main__":
